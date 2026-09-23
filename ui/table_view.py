@@ -1,11 +1,13 @@
 """Các thao tác giao diện dùng chung cho một bảng dữ liệu."""
 
 import tkinter as tk
+from datetime import datetime
 from tkinter import messagebox, ttk
 from typing import Any
 
-from database.database import Database
+from tkcalendar import DateEntry
 
+from database.database import Database
 
 class TableView(ttk.Frame):
     """Màn hình CRUD dùng chung cho từng bảng."""
@@ -14,7 +16,7 @@ class TableView(ttk.Frame):
         super().__init__(parent)
         self.db = db
         self.config = config
-        self.widgets: dict[str, ttk.Entry | ttk.Combobox] = {}
+        self.widgets: dict[str, ttk.Entry | ttk.Combobox | DateEntry | TimePicker] = {}
         self.foreign_values: dict[str, dict[str, int]] = {}
         self.tree: ttk.Treeview
         self.search_entry: ttk.Entry
@@ -31,8 +33,17 @@ class TableView(ttk.Frame):
                 row=index // 3 * 2, column=index % 3 * 2, sticky="w", padx=(0, 6)
             )
             if column in self.config.get("foreign_keys", {}):
-                widget: ttk.Entry | ttk.Combobox = ttk.Combobox(form, state="readonly", width=22)
+                widget: ttk.Entry | ttk.Combobox | DateEntry = ttk.Combobox(form, state="readonly", width=22)
                 self.load_foreign_options(widget, column)
+            elif column in self.config.get("time_fields", []):
+                widget = TimePicker(form)
+            elif column in self.config.get("date_fields", {}):
+                widget = DateEntry(
+                    form,
+                    width=22,
+                    date_pattern=self.config["date_fields"][column],
+                    locale="vi_VN",
+                )
             else:
                 widget = ttk.Entry(form, width=24)
             widget.grid(row=index // 3 * 2 + 1, column=index % 3 * 2, sticky="ew", padx=(0, 14), pady=(0, 8))
@@ -91,11 +102,25 @@ class TableView(ttk.Frame):
             input_column = self.config.get("display_to_input", {}).get(column, column)
             widget = self.widgets.get(input_column)
             if widget is not None:
-                widget.delete(0, tk.END)
-                widget.insert(0, value)
+                if input_column in self.config.get("date_fields", {}):
+                    text_value = str(value)
+                    if input_column in self.config.get("month_fields", []):
+                        text_value = f"{text_value[:7]}-01"
+                    widget.set_date(datetime.strptime(text_value[:10], "%Y-%m-%d").date())
+                elif input_column in self.config.get("time_fields", []):
+                    widget.set(str(value)[:5])
+                else:
+                    widget.delete(0, tk.END)
+                    widget.insert(0, value)
 
     def value(self, column: str) -> Any:
         value = self.widgets[column].get().strip()
+        if column in self.config.get("month_fields", []):
+            return datetime.strptime(value, "%d/%m/%Y").strftime("%Y-%m")
+        if column in self.config.get("date_fields", {}):
+            pattern = self.config["date_fields"][column]
+            if pattern == "dd/mm/yyyy":
+                return datetime.strptime(value, "%d/%m/%Y").strftime("%Y-%m-%d")
         return self.foreign_values.get(column, {}).get(value, value or None)
 
     def selected_id(self) -> Any:
@@ -147,3 +172,30 @@ class TableView(ttk.Frame):
             self.load_rows()
         except RuntimeError as error:
             messagebox.showerror("Lỗi", str(error))
+
+
+class TimePicker(ttk.Frame):
+    """Bộ chọn giờ đơn giản gồm giờ và phút như TimePicker."""
+
+    def __init__(self, parent: tk.Misc) -> None:
+        super().__init__(parent)
+        self.hour = tk.StringVar(value="08")
+        self.minute = tk.StringVar(value="00")
+        ttk.Spinbox(self, from_=0, to=23, wrap=True, textvariable=self.hour, width=4, format="%02.0f").pack(side="left")
+        ttk.Label(self, text=":", padding=(3, 0)).pack(side="left")
+        ttk.Spinbox(self, from_=0, to=59, increment=1, wrap=True, textvariable=self.minute, width=4, format="%02.0f").pack(side="left")
+
+    def get(self) -> str:
+        return f"{int(self.hour.get()):02d}:{int(self.minute.get()):02d}"
+
+    def delete(self, _start: int = 0, _end: str | None = None) -> None:
+        self.hour.set("08")
+        self.minute.set("00")
+
+    def insert(self, _index: int, value: str) -> None:
+        parts = str(value).split(":")
+        self.hour.set(parts[0].zfill(2))
+        self.minute.set((parts[1] if len(parts) > 1 else "00").zfill(2))
+
+    def set(self, value: str) -> None:
+        self.insert(0, value)

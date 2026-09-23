@@ -14,4 +14,6 @@ class LuongView(TableView):
             "select": "SELECT l.ma_luong, COALESCE(n.ho_ten, '') AS ho_ten, l.thang, l.luong_co_ban, l.tien_thuong, l.tong_luong FROM luong l LEFT JOIN nhan_vien n ON n.ma_nhan_vien=l.ma_nhan_vien",
             "display_to_input": {"ho_ten": "ma_nhan_vien"},
             "foreign_keys": {"ma_nhan_vien": ("nhan_vien", "ma_nhan_vien", "ho_ten")},
+            "date_fields": {"thang": "dd/mm/yyyy"},
+            "month_fields": ["thang"],
         })

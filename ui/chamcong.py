@@ -14,4 +14,6 @@ class ChamCongView(TableView):
             "select": "SELECT cc.ma_cham_cong, COALESCE(n.ho_ten, '') AS ho_ten, cc.ngay_lam_viec, cc.gio_vao, cc.gio_ra, cc.trang_thai FROM cham_cong cc LEFT JOIN nhan_vien n ON n.ma_nhan_vien=cc.ma_nhan_vien",
             "display_to_input": {"ho_ten": "ma_nhan_vien"},
             "foreign_keys": {"ma_nhan_vien": ("nhan_vien", "ma_nhan_vien", "ho_ten")},
+            "date_fields": {"ngay_lam_viec": "dd/mm/yyyy"},
+            "time_fields": ["gio_vao", "gio_ra"],
         })
