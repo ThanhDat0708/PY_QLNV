@@ -17,7 +17,7 @@ load_dotenv()
 
 
 class Database:
-    """Kết nối MySQL đơn giản, dùng lại cho các màn hình quản lý."""
+    """Kết nối MySQL"""
 
     def __init__(self) -> None:
         self.config = {

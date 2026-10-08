@@ -43,7 +43,10 @@ class MainWindow:
             ("Lương", LuongView),
         ]
         for title, view_class in buttons:
-            ttk.Button(menu, text=title, style="Menu.TButton", command=lambda c=view_class, t=title: self.show_view(c, t)).pack(fill="x", pady=3)
+            ttk.Button(menu, text=title, 
+                       style="Menu.TButton",
+                        command=lambda c=view_class,
+                        t=title: self.show_view(c, t)).pack(fill="x", pady=3)
         self.content = ttk.Frame(body)
         self.content.pack(side="left", fill="both", expand=True)
 

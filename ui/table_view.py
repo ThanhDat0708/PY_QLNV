@@ -2,6 +2,7 @@
 
 import tkinter as tk
 from datetime import datetime
+import re
 from tkinter import messagebox, ttk
 from typing import Any
 
@@ -46,15 +47,22 @@ class TableView(ttk.Frame):
                 )
             else:
                 widget = ttk.Entry(form, width=24)
+            if column in self.config.get("computed_fields", {}):
+                widget.configure(state="readonly")
             widget.grid(row=index // 3 * 2 + 1, column=index % 3 * 2, sticky="ew", padx=(0, 14), pady=(0, 8))
             self.widgets[column] = widget
+            if column in self.config.get("computed_fields", {}):
+                for source_column in self.config["computed_fields"][column]["sources"]:
+                    self.widgets[source_column].bind(
+                        "<KeyRelease>", lambda _event: self.update_computed_fields()
+                    )
 
         actions = ttk.Frame(self)
         actions.pack(fill="x", pady=8)
         ttk.Button(actions, text="Thêm", command=self.add).pack(side="left", padx=(0, 6))
         ttk.Button(actions, text="Sửa", command=self.edit).pack(side="left", padx=6)
         ttk.Button(actions, text="Xóa", command=self.remove).pack(side="left", padx=6)
-        ttk.Button(actions, text="Làm mới", command=self.load_rows).pack(side="left", padx=6)
+        ttk.Button(actions, text="Làm mới", command=self.refresh).pack(side="left", padx=6)
         self.search_entry = ttk.Entry(actions, width=26)
         self.search_entry.pack(side="right", padx=(6, 0))
         ttk.Button(actions, text="Tìm kiếm", command=lambda: self.load_rows(self.search_entry.get())).pack(side="right")
@@ -65,10 +73,13 @@ class TableView(ttk.Frame):
         for column in self.config["display_columns"]:
             self.tree.heading(column, text=self.config["labels"][column])
             self.tree.column(column, width=135, anchor="w")
-        self.tree.pack(side="left", fill="both", expand=True)
+        self.tree.pack(side="top", fill="both", expand=True)
         scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
-        scrollbar.pack(side="right", fill="y")
+        scrollbar.pack(side="right", fill="y", before=self.tree)
+        horizontal_scrollbar = ttk.Scrollbar(table_frame, orient="horizontal", command=self.tree.xview)
+        horizontal_scrollbar.pack(side="bottom", fill="x")
         self.tree.configure(yscrollcommand=scrollbar.set)
+        self.tree.configure(xscrollcommand=horizontal_scrollbar.set)
         self.tree.bind("<<TreeviewSelect>>", self.select_row)
 
     def load_foreign_options(self, widget: ttk.Combobox, column: str) -> None:
@@ -86,12 +97,33 @@ class TableView(ttk.Frame):
             self.tree.delete(*self.tree.get_children())
             keyword = keyword.lower().strip()
             for row in rows:
-                values = [row[column] for column in self.config["display_columns"]]
+                values = [
+                    self.format_display_value(column, row[column])
+                    for column in self.config["display_columns"]
+                ]
                 text = " ".join(str(value or "") for value in values).lower()
                 if not keyword or keyword in text:
                     self.tree.insert("", "end", values=values)
         except RuntimeError as error:
             messagebox.showerror("Lỗi kết nối", str(error))
+
+    def refresh(self) -> None:
+        """Tải lại dữ liệu và đưa form về trạng thái nhập mới."""
+        self.search_entry.delete(0, tk.END)
+        self.tree.selection_remove(self.tree.selection())
+        for column, widget in self.widgets.items():
+            if isinstance(widget, ttk.Combobox):
+                widget.set("")
+            elif column in self.config.get("time_fields", []):
+                widget.delete()
+            elif column in self.config.get("date_fields", {}):
+                widget.set_date(datetime.now().date())
+            elif column in self.config.get("computed_fields", {}):
+                self.set_widget_value(widget, "")
+            else:
+                widget.delete(0, tk.END)
+        self.update_computed_fields()
+        self.load_rows()
 
     def select_row(self, _event: object) -> None:
         selected = self.tree.selection()
@@ -109,12 +141,48 @@ class TableView(ttk.Frame):
                     widget.set_date(datetime.strptime(text_value[:10], "%Y-%m-%d").date())
                 elif input_column in self.config.get("time_fields", []):
                     widget.set(str(value)[:5])
+                elif isinstance(widget, ttk.Combobox):
+                    widget.set(str(value))
+                elif input_column in self.config.get("computed_fields", {}):
+                    self.set_widget_value(widget, str(value))
                 else:
                     widget.delete(0, tk.END)
                     widget.insert(0, value)
+        self.update_computed_fields()
+
+    def set_widget_value(self, widget: ttk.Entry, value: str) -> None:
+        widget.configure(state="normal")
+        widget.delete(0, tk.END)
+        widget.insert(0, value)
+        widget.configure(state="readonly")
+
+    def update_computed_fields(self) -> None:
+        for target, formula in self.config.get("computed_fields", {}).items():
+            total = sum(
+                self.number_value(column) for column in formula.get("add", [])
+            )
+            for multiplier in formula.get("multiply", []):
+                total *= self.number_value(multiplier)
+            total += sum(
+                self.number_value(column)
+                for column in formula.get("add_after_multiply", [])
+            )
+            total -= sum(self.number_value(column) for column in formula["subtract"])
+            self.set_widget_value(self.widgets[target], f"{total:,.2f}")
+
+    def number_value(self, column: str) -> float:
+        value = self.widgets[column].get().replace(",", "").strip()
+        try:
+            return float(value or 0)
+        except ValueError:
+            return 0.0
 
     def value(self, column: str) -> Any:
         value = self.widgets[column].get().strip()
+        if column in self.config.get("number_fields", []):
+            value = value.replace(",", "").replace(".", "") if self.config.get(
+                "decimal_separator"
+            ) == "," else value.replace(",", "")
         if column in self.config.get("month_fields", []):
             return datetime.strptime(value, "%d/%m/%Y").strftime("%Y-%m")
         if column in self.config.get("date_fields", {}):
@@ -123,12 +191,64 @@ class TableView(ttk.Frame):
                 return datetime.strptime(value, "%d/%m/%Y").strftime("%Y-%m-%d")
         return self.foreign_values.get(column, {}).get(value, value or None)
 
+    def format_display_value(self, column: str, value: Any) -> Any:
+        if value is None or column not in self.config.get("money_fields", []):
+            return value
+        try:
+            return f"{float(value):,.2f}"
+        except (TypeError, ValueError):
+            return value
+
+    def missing_required_columns(self) -> list[str]:
+        missing = []
+        required_columns = self.config.get(
+            "required_columns",
+            [
+                column for column in self.config["input_columns"]
+                if column not in self.config.get("computed_fields", {})
+            ],
+        )
+        for column in required_columns:
+            widget = self.widgets[column]
+            if not widget.get().strip():
+                missing.append(self.config["labels"][column])
+        return missing
+
+    def invalid_columns(self) -> list[str]:
+        errors = []
+        for column, rule in self.config.get("validation", {}).items():
+            value = self.widgets[column].get().strip()
+            if rule == "name" and not re.fullmatch(r"[^\W\d_]{2,}(?:[\s'-]+[^\W\d_]{2,})+", value, re.UNICODE):
+                errors.append(f"{self.config['labels'][column]} (nhập ít nhất họ và tên, chỉ dùng chữ)")
+            elif rule == "phone" and not re.fullmatch(r"0\d{9}", value):
+                errors.append(f"{self.config['labels'][column]} (phải đúng 10 chữ số và bắt đầu bằng 0)")
+            elif rule == "email" and not re.fullmatch(r"[a-z0-9][a-z0-9._%+-]*@[a-z0-9.-]+\.[a-z]{2,}", value):
+                errors.append(f"{self.config['labels'][column]} (phải viết thường, ví dụ: ten@congty.com)")
+        return errors
+
     def selected_id(self) -> Any:
         selected = self.tree.selection()
         return self.tree.item(selected[0], "values")[0] if selected else None
 
     def add(self) -> None:
-        columns = self.config["input_columns"]
+        missing = self.missing_required_columns()
+        if missing:
+            messagebox.showwarning(
+                "Thiếu thông tin",
+                "Vui lòng nhập/chọn: " + ", ".join(missing),
+            )
+            return
+        invalid = self.invalid_columns()
+        if invalid:
+            messagebox.showwarning(
+                "Dữ liệu không hợp lệ",
+                "Vui lòng kiểm tra: " + ", ".join(invalid),
+            )
+            return
+        columns = [
+            column for column in self.config["input_columns"]
+            if column not in self.config.get("computed_fields", {})
+        ]
         values = tuple(self.value(column) for column in columns)
         try:
             self.db.execute(
@@ -145,7 +265,24 @@ class TableView(ttk.Frame):
         if not record_id:
             messagebox.showwarning("Thiếu dữ liệu", "Hãy chọn bản ghi cần sửa.")
             return
-        columns = self.config["input_columns"]
+        missing = self.missing_required_columns()
+        if missing:
+            messagebox.showwarning(
+                "Thiếu thông tin",
+                "Vui lòng nhập/chọn: " + ", ".join(missing),
+            )
+            return
+        invalid = self.invalid_columns()
+        if invalid:
+            messagebox.showwarning(
+                "Dữ liệu không hợp lệ",
+                "Vui lòng kiểm tra: " + ", ".join(invalid),
+            )
+            return
+        columns = [
+            column for column in self.config["input_columns"]
+            if column not in self.config.get("computed_fields", {})
+        ]
         try:
             self.db.execute(
                 f"UPDATE {self.config['table']} SET {', '.join(f'{column}=%s' for column in columns)} "

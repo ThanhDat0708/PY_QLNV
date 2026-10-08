@@ -1,4 +1,3 @@
-"""Điểm khởi động của ứng dụng quản lý nhân viên."""
 
 from ui.main_window import MainWindow
 
