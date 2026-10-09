@@ -3,6 +3,7 @@
 import tkinter as tk
 from datetime import datetime
 import re
+import unicodedata
 from tkinter import messagebox, ttk
 from typing import Any
 
@@ -26,7 +27,7 @@ class TableView(ttk.Frame):
 
     def build_form(self) -> None:
         ttk.Label(self, text=self.config["title"], style="Title.TLabel").pack(anchor="w", pady=(0, 10))
-        form = ttk.LabelFrame(self, text="Thông tin", padding=10)
+        form = ttk.LabelFrame(self, text="THÔNG TIN", padding=10)
         form.pack(fill="x")
 
         for index, column in enumerate(self.config["input_columns"]):
@@ -59,13 +60,17 @@ class TableView(ttk.Frame):
 
         actions = ttk.Frame(self)
         actions.pack(fill="x", pady=8)
-        ttk.Button(actions, text="Thêm", command=self.add).pack(side="left", padx=(0, 6))
-        ttk.Button(actions, text="Sửa", command=self.edit).pack(side="left", padx=6)
-        ttk.Button(actions, text="Xóa", command=self.remove).pack(side="left", padx=6)
+        ttk.Button(actions, text="Thêm", style="Success.TButton", command=self.add).pack(side="left", padx=(0, 6))
+        ttk.Button(actions, text="Sửa", style="Info.TButton", command=self.edit).pack(side="left", padx=6)
+        ttk.Button(actions, text="Xóa", style="Danger.TButton", command=self.remove).pack(side="left", padx=6)
         ttk.Button(actions, text="Làm mới", command=self.refresh).pack(side="left", padx=6)
         self.search_entry = ttk.Entry(actions, width=26)
         self.search_entry.pack(side="right", padx=(6, 0))
-        ttk.Button(actions, text="Tìm kiếm", command=lambda: self.load_rows(self.search_entry.get())).pack(side="right")
+        self.search_entry.bind("<Return>", lambda _event: self.search())
+        ttk.Button(actions, text="Xóa tìm kiếm", command=self.clear_search).pack(side="right", padx=6)
+        ttk.Button(actions, text="Tìm kiếm", command=self.search).pack(side="right")
+        self.result_label = ttk.Label(actions, text="")
+        self.result_label.pack(side="right", padx=8)
 
         table_frame = ttk.Frame(self)
         table_frame.pack(fill="both", expand=True)
@@ -95,17 +100,38 @@ class TableView(ttk.Frame):
         try:
             rows = self.db.fetch_all(self.config["select"])
             self.tree.delete(*self.tree.get_children())
-            keyword = keyword.lower().strip()
+            keyword = self.normalize_search(keyword)
+            visible_count = 0
             for row in rows:
                 values = [
                     self.format_display_value(column, row[column])
                     for column in self.config["display_columns"]
                 ]
-                text = " ".join(str(value or "") for value in values).lower()
+                text = self.normalize_search(" ".join(str(value or "") for value in values))
                 if not keyword or keyword in text:
                     self.tree.insert("", "end", values=values)
+                    visible_count += 1
+            self.result_label.configure(
+                text=f"{visible_count}/{len(rows)} bản ghi"
+            )
         except RuntimeError as error:
             messagebox.showerror("Lỗi kết nối", str(error))
+
+    @staticmethod
+    def normalize_search(value: str) -> str:
+        """Chuẩn hóa từ khóa để tìm kiếm không phân biệt hoa thường và dấu."""
+        normalized = unicodedata.normalize("NFD", value)
+        return "".join(
+            char for char in normalized
+            if unicodedata.category(char) != "Mn"
+        ).lower().strip()
+
+    def search(self) -> None:
+        self.load_rows(self.search_entry.get())
+
+    def clear_search(self) -> None:
+        self.search_entry.delete(0, tk.END)
+        self.load_rows()
 
     def refresh(self) -> None:
         """Tải lại dữ liệu và đưa form về trạng thái nhập mới."""

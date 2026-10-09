@@ -1,6 +1,9 @@
 """Các thao tác kết nối và truy vấn MySQL."""
 
 import os
+import hashlib
+import hmac
+import secrets
 from contextlib import contextmanager
 from typing import Any, Iterator
 
@@ -61,6 +64,37 @@ class Database:
             cursor.close()
             return affected_rows
 
+    def register_user(self, username: str, password: str, full_name: str) -> None:
+        """Tạo tài khoản mới với mật khẩu đã được băm và salt riêng."""
+        salt = secrets.token_bytes(16)
+        password_hash = _hash_password(password, salt)
+        try:
+            self.execute(
+                "INSERT INTO nguoi_dung "
+                "(ten_dang_nhap, mat_khau_hash, salt, ho_ten, vai_tro) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                (username, password_hash, salt, full_name, "user"),
+            )
+        except RuntimeError as error:
+            if "Duplicate entry" in str(error):
+                raise ValueError("Tên đăng nhập đã tồn tại.") from error
+            raise
+
+    def authenticate_user(self, username: str, password: str) -> dict[str, Any] | None:
+        """Trả về tài khoản hợp lệ, hoặc None nếu thông tin đăng nhập sai."""
+        rows = self.fetch_all(
+            "SELECT ma_nguoi_dung, ten_dang_nhap, mat_khau_hash, salt, ho_ten, vai_tro "
+            "FROM nguoi_dung WHERE ten_dang_nhap=%s AND trang_thai='Hoat dong'",
+            (username,),
+        )
+        if not rows:
+            return None
+        account = rows[0]
+        expected = _hash_password(password, account["salt"])
+        if not hmac.compare_digest(expected, account["mat_khau_hash"]):
+            return None
+        return account
+
     def test_connection(self) -> tuple[bool, str]:
         try:
             with self.connection() as connection:
@@ -69,3 +103,9 @@ class Database:
         except (RuntimeError, Error) as error:
             return False, str(error)
         return False, "Không thể kết nối MySQL"
+
+
+def _hash_password(password: str, salt: bytes) -> bytes:
+    return hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt, 600_000
+    )
